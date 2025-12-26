@@ -1,24 +1,27 @@
 import ReactDOM from "react-dom/client";
-import App from "./App.tsx";
+import BlockingOverlay from "./App.tsx";
 import "@/assets/tailwind.css";
+
 export default defineContentScript({
   matches: ["*://*/*"],
   cssInjectionMode: "ui",
-  runAt:"document_start",
+  runAt: "document_start",
 
   async main(ctx) {
     const ui = await createShadowRootUi(ctx, {
-      name: "wxt-react-example",
-      position: "inline",
+      name: "lockout-overlay",
+      position: "overlay",
+      // zIndex: 2147483647,
       anchor: document.documentElement,
       append: "first",
       onMount: (container) => {
-        // Don't mount react app directly on <body>
+        // Create wrapper for React
         const wrapper = document.createElement("div");
+        wrapper.id = "lockout-root";
         container.append(wrapper);
 
         const root = ReactDOM.createRoot(wrapper);
-        root.render(<App />);
+        root.render(<BlockingOverlay />);
         return { root, wrapper };
       },
       onRemove: (elements) => {

@@ -38,7 +38,9 @@ export default defineConfig({
             browser_specific_settings: {
               gecko: {
                 strict_min_version: "128.0",
-                data_collection_permissions: "none",
+                data_collection_permissions: {
+                  required: ["none"],
+                },
               },
             },
           }

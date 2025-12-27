@@ -21,27 +21,9 @@ import {
   IconCheck,
   IconX,
   IconArrowRight,
+  IconArrowLeft,
+  IconLockOpen,
 } from "@tabler/icons-react";
-
-// Message helpers to communicate with background script
-async function checkBlocked(url: string): Promise<{
-  blocked: boolean;
-  site: BlockedSite | null;
-  statsEnabled: boolean;
-}> {
-  return browser.runtime.sendMessage({ type: "CHECK_BLOCKED", url });
-}
-
-async function updateStats(
-  siteId: string,
-  update: {
-    incrementVisit?: boolean;
-    incrementPassed?: boolean;
-    addTime?: number;
-  }
-): Promise<void> {
-  await browser.runtime.sendMessage({ type: "UPDATE_STATS", siteId, update });
-}
 
 // Timer Challenge Component
 const TimerChallenge = memo(function TimerChallenge({
@@ -323,107 +305,198 @@ const TypeChallenge = memo(function TypeChallenge({
   );
 });
 
-// Main overlay component
-export default function BlockingOverlay() {
+// Main blocked page component
+export default function BlockedPage() {
   const [blockedSite, setBlockedSite] = useState<BlockedSite | null>(null);
-  const [isBlocked, setIsBlocked] = useState(false);
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [challengeComplete, setChallengeComplete] = useState(false);
+  const [alreadyUnlocked, setAlreadyUnlocked] = useState(false);
   const [statsEnabled, setStatsEnabled] = useState(true);
-  const [checking, setChecking] = useState(true);
-  const [unlockedAt, setUnlockedAt] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
   const visitTracked = useRef(false);
-  const timeTrackingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number>(0);
+  const siteIdRef = useRef<string | null>(null);
 
-  // Check if current site is blocked
+  // Parse URL params and get site info
   useEffect(() => {
-    const doCheck = async () => {
-      try {
-        const url = window.location.href;
-        const result = await checkBlocked(url);
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get("url");
+    const siteId = params.get("siteId");
 
-        if (result.blocked && result.site) {
-          setBlockedSite(result.site);
-          setIsBlocked(true);
-          setStatsEnabled(result.statsEnabled);
-
-          if (result.statsEnabled && !visitTracked.current) {
-            visitTracked.current = true;
-            await updateStats(result.site.id, { incrementVisit: true });
-          }
-        }
-      } catch (error) {
-        console.error("[distacted] Error checking block status:", error);
-      }
-
-      setChecking(false);
-    };
-
-    doCheck();
-  }, []);
-
-  // Handle auto-relock timer (tab-local)
-  useEffect(() => {
-    if (!unlockedAt || !blockedSite?.autoRelockAfter) return;
-
-    const relockTime = unlockedAt + blockedSite.autoRelockAfter * 60 * 1000;
-    const timeUntilRelock = relockTime - Date.now();
-
-    if (timeUntilRelock <= 0) {
-      // Already expired
-      setIsBlocked(true);
-      setChallengeComplete(false);
-      setUnlockedAt(null);
+    if (!url) {
+      setError("No URL provided");
+      setLoading(false);
       return;
     }
 
-    const timer = setTimeout(() => {
-      setIsBlocked(true);
-      setChallengeComplete(false);
-      setUnlockedAt(null);
-    }, timeUntilRelock);
+    setOriginalUrl(url);
+    siteIdRef.current = siteId;
 
-    return () => clearTimeout(timer);
-  }, [unlockedAt, blockedSite?.autoRelockAfter]);
+    // Get site info from background
+    (async () => {
+      try {
+        const result = await browser.runtime.sendMessage({
+          type: "GET_SITE_INFO",
+          siteId,
+          url,
+        });
+
+        if (result.error) {
+          setError(result.error);
+        } else if (result.site) {
+          setBlockedSite(result.site);
+          setStatsEnabled(result.statsEnabled);
+          siteIdRef.current = result.site.id;
+
+          // Check if already unlocked by another tab
+          if (result.alreadyUnlocked) {
+            setAlreadyUnlocked(true);
+            setChallengeComplete(true);
+          }
+
+          // Track visit (only if not already unlocked)
+          if (
+            result.statsEnabled &&
+            !visitTracked.current &&
+            !result.alreadyUnlocked
+          ) {
+            visitTracked.current = true;
+            await browser.runtime.sendMessage({
+              type: "UPDATE_STATS",
+              siteId: result.site.id,
+              update: { incrementVisit: true },
+            });
+          }
+        } else {
+          // Site no longer blocked or already unlocked, redirect through
+          window.location.href = url;
+        }
+      } catch (err) {
+        console.error("[distacted] Error getting site info:", err);
+        setError("Failed to load blocking info");
+      }
+
+      setLoading(false);
+    })();
+  }, []);
+
+  // Listen for unlock/relock events from other tabs
+  useEffect(() => {
+    const handleMessage = (message: {
+      type: string;
+      siteId?: string;
+      expiresAt?: number;
+    }) => {
+      if (!siteIdRef.current) return;
+
+      if (
+        message.type === "SITE_UNLOCKED" &&
+        message.siteId === siteIdRef.current
+      ) {
+        // Another tab completed the challenge - skip to "Continue to site"
+        setAlreadyUnlocked(true);
+        setChallengeComplete(true);
+      }
+
+      if (
+        message.type === "SITE_RELOCKED" &&
+        message.siteId === siteIdRef.current
+      ) {
+        // Site was relocked - refresh the page to show challenge again
+        window.location.reload();
+      }
+    };
+
+    browser.runtime.onMessage.addListener(handleMessage);
+    return () => {
+      browser.runtime.onMessage.removeListener(handleMessage);
+    };
+  }, []);
 
   const handleChallengeComplete = useCallback(() => {
     setChallengeComplete(true);
   }, []);
 
   const handleUnlock = useCallback(async () => {
-    if (!blockedSite) return;
+    if (!blockedSite || !originalUrl) return;
 
-    // Set unlock time for auto-relock (tab-local state)
-    setUnlockedAt(Date.now());
+    setUnlocking(true);
 
-    if (statsEnabled) {
-      await updateStats(blockedSite.id, { incrementPassed: true });
-
-      startTimeRef.current = Date.now();
-      timeTrackingRef.current = setInterval(async () => {
-        const elapsed = Date.now() - startTimeRef.current;
-        startTimeRef.current = Date.now();
-        await updateStats(blockedSite.id, { addTime: elapsed });
-      }, 30000);
-    }
-
-    setIsBlocked(false);
-  }, [blockedSite, statsEnabled]);
-
-  useEffect(() => {
-    return () => {
-      if (timeTrackingRef.current) {
-        clearInterval(timeTrackingRef.current);
-        if (startTimeRef.current > 0 && blockedSite) {
-          const elapsed = Date.now() - startTimeRef.current;
-          updateStats(blockedSite.id, { addTime: elapsed });
-        }
+    try {
+      // If already unlocked by another tab, just navigate
+      if (alreadyUnlocked) {
+        window.location.href = originalUrl;
+        return;
       }
-    };
-  }, [blockedSite]);
 
-  if (checking) return null;
-  if (!isBlocked || !blockedSite) return null;
+      // Request unlock from background
+      const result = await browser.runtime.sendMessage({
+        type: "UNLOCK_SITE",
+        siteId: blockedSite.id,
+        durationMinutes: blockedSite.autoRelockAfter,
+      });
+
+      if (result.success) {
+        // Track passed challenge
+        if (statsEnabled) {
+          await browser.runtime.sendMessage({
+            type: "UPDATE_STATS",
+            siteId: blockedSite.id,
+            update: { incrementPassed: true },
+          });
+        }
+
+        // Navigate to original URL
+        window.location.href = originalUrl;
+      } else {
+        setError(result.error || "Failed to unlock");
+        setUnlocking(false);
+      }
+    } catch (err) {
+      console.error("[distacted] Error unlocking:", err);
+      setError("Failed to unlock site");
+      setUnlocking(false);
+    }
+  }, [blockedSite, originalUrl, statsEnabled, alreadyUnlocked]);
+
+  const handleGoBack = useCallback(() => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.close();
+    }
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="pt-6 text-center">
+            <IconX className="size-12 mx-auto text-destructive mb-4" />
+            <p className="text-lg font-medium mb-2">Error</p>
+            <p className="text-muted-foreground text-sm mb-4">{error}</p>
+            <Button onClick={handleGoBack} variant="outline">
+              <IconArrowLeft className="size-4" />
+              Go Back
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!blockedSite) {
+    return null;
+  }
 
   const methodIcons: Record<UnlockMethod, React.ReactNode> = {
     timer: <IconClock className="size-5" />,
@@ -439,16 +512,16 @@ export default function BlockingOverlay() {
 
   return (
     <div
-      className="fixed inset-0 w-screen h-screen flex items-center justify-center p-4 dark"
+      className="min-h-screen w-full flex items-center justify-center p-4 dark"
       style={{
-        zIndex: 2147483647,
-        backgroundColor: "rgba(0, 0, 0, 1)",
+        backgroundColor: "hsl(var(--background))",
         fontFamily:
           "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       }}
     >
+      {/* Background pattern */}
       <div
-        className="absolute inset-0 opacity-5"
+        className="fixed inset-0 opacity-5 pointer-events-none"
         style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
         }}
@@ -470,43 +543,77 @@ export default function BlockingOverlay() {
         </CardHeader>
 
         <CardContent className="space-y-3">
-          <div className="p-3 rounded-lg bg-muted/30">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border/30">
-              <div className="text-primary">
-                {methodIcons[blockedSite.unlockMethod]}
-              </div>
-              <span className="font-medium">
-                {methodTitles[blockedSite.unlockMethod]}
-              </span>
+          {/* Show the URL being blocked */}
+          {originalUrl && (
+            <div className="text-xs text-muted-foreground text-center truncate px-4 -mt-2 mb-2">
+              {originalUrl}
             </div>
+          )}
 
-            {blockedSite.unlockMethod === "timer" && (
-              <TimerChallenge
-                duration={blockedSite.unlockDuration}
-                onComplete={handleChallengeComplete}
-              />
-            )}
+          {/* Already unlocked by another tab - show simple continue */}
+          {alreadyUnlocked ? (
+            <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
+              <div className="flex items-center gap-3 text-green-500">
+                <IconLockOpen className="size-6" />
+                <div>
+                  <p className="font-medium">Already Unlocked</p>
+                  <p className="text-sm text-green-500/80">
+                    Challenge completed in another tab
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Show the challenge */
+            <div className="p-3 rounded-lg bg-muted/30">
+              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border/30">
+                <div className="text-primary">
+                  {methodIcons[blockedSite.unlockMethod]}
+                </div>
+                <span className="font-medium">
+                  {methodTitles[blockedSite.unlockMethod]}
+                </span>
+              </div>
 
-            {blockedSite.unlockMethod === "hold" && (
-              <HoldChallenge
-                duration={blockedSite.unlockDuration}
-                onComplete={handleChallengeComplete}
-              />
-            )}
+              {blockedSite.unlockMethod === "timer" && (
+                <TimerChallenge
+                  duration={blockedSite.unlockDuration}
+                  onComplete={handleChallengeComplete}
+                />
+              )}
 
-            {blockedSite.unlockMethod === "type" && (
-              <TypeChallenge onComplete={handleChallengeComplete} />
-            )}
-          </div>
+              {blockedSite.unlockMethod === "hold" && (
+                <HoldChallenge
+                  duration={blockedSite.unlockDuration}
+                  onComplete={handleChallengeComplete}
+                />
+              )}
+
+              {blockedSite.unlockMethod === "type" && (
+                <TypeChallenge onComplete={handleChallengeComplete} />
+              )}
+            </div>
+          )}
 
           {challengeComplete && (
-            <Button onClick={handleUnlock} className="w-full" size="lg">
-              Continue to Site
-              <IconArrowRight className="size-4" />
+            <Button
+              onClick={handleUnlock}
+              className="w-full"
+              size="lg"
+              disabled={unlocking}
+            >
+              {unlocking ? (
+                "Unlocking..."
+              ) : (
+                <>
+                  Continue to Site
+                  <IconArrowRight className="size-4" />
+                </>
+              )}
             </Button>
           )}
 
-          {blockedSite.autoRelockAfter && (
+          {blockedSite.autoRelockAfter && !alreadyUnlocked && (
             <p className="text-xs text-center text-muted-foreground">
               Access will expire after {blockedSite.autoRelockAfter} minute
               {blockedSite.autoRelockAfter > 1 ? "s" : ""}
@@ -516,8 +623,8 @@ export default function BlockingOverlay() {
       </Card>
 
       <button
-        onClick={() => window.history.back()}
-        className="absolute top-4 right-4 p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+        onClick={handleGoBack}
+        className="fixed top-4 right-4 p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
         title="Go back"
       >
         <IconX className="size-5" />

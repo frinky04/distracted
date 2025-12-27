@@ -10,14 +10,13 @@ import {
   urlMatchesSiteRules,
   type BlockedSite,
 } from "@/lib/storage";
-
-// Rule ID management - we use a base offset + site index
-const RULE_ID_BASE = 1000;
-const MAX_RULES_PER_SITE = 100; // Max patterns per site
-
-// Session storage keys for unlock state
-const UNLOCK_PREFIX = "unlock_";
-const ALARM_PREFIX = "relock_";
+import {
+  RULE_ID_BASE,
+  MAX_RULES_PER_SITE,
+  UNLOCK_PREFIX,
+  ALARM_PREFIX,
+} from "@/lib/consts";
+import { isInternalUrl } from "@/lib/utils";
 
 interface UnlockState {
   siteId: string;
@@ -218,9 +217,8 @@ export async function findTabsOnBlockedSite(siteId: string): Promise<number[]> {
 
   for (const tab of tabs) {
     if (!tab.id || !tab.url) continue;
-    // Skip extension pages
-    if (tab.url.startsWith("chrome-extension://")) continue;
-    if (tab.url.startsWith("moz-extension://")) continue;
+    // Skip extension pages and internal URLs
+    if (isInternalUrl(tab.url)) continue;
 
     if (urlMatchesSiteRules(tab.url, site)) {
       matchingTabIds.push(tab.id);

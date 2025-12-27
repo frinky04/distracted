@@ -30,19 +30,15 @@ export interface Settings {
   statsEnabled: boolean;
 }
 
+import { DEFAULT_AUTO_RELOCK, STORAGE_KEYS } from "./consts";
+
 // Default values
 export const defaultSettings: Settings = {
   statsEnabled: true,
 };
 
-export const DEFAULT_AUTO_RELOCK = 3; // 3 minutes default
-
-// Storage keys
-const STORAGE_KEYS = {
-  BLOCKED_SITES: "blockedSites",
-  STATS: "siteStats",
-  SETTINGS: "settings",
-} as const;
+// Re-export for backwards compatibility
+export { DEFAULT_AUTO_RELOCK };
 
 // Generate a short random ID
 export function generateId(): string {
@@ -238,20 +234,6 @@ export async function findMatchingBlockedSite(
   return sites.find((site) => urlMatchesSiteRules(url, site)) || null;
 }
 
-// Format time duration
-export function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
-}
 
 // Get current tab URL (for popup)
 export async function getCurrentTabUrl(): Promise<string | null> {

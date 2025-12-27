@@ -8,7 +8,6 @@ import {
   getSettings,
   saveSettings,
   clearStats,
-  formatDuration,
   DEFAULT_AUTO_RELOCK,
   type BlockedSite,
   type SiteStats,
@@ -16,6 +15,8 @@ import {
   type UnlockMethod,
   type PatternRule,
 } from "@/lib/storage";
+import { formatDuration } from "@/lib/utils";
+import { UNLOCK_METHOD_INFO } from "@/lib/consts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,27 +42,6 @@ import {
 } from "@tabler/icons-react";
 
 type View = "main" | "add" | "edit" | "stats" | "settings";
-
-const UNLOCK_METHOD_INFO: Record<
-  UnlockMethod,
-  { label: string; icon: React.ReactNode; description: string }
-> = {
-  timer: {
-    label: "Wait Timer",
-    icon: <IconClock className="size-4" />,
-    description: "Wait for a countdown to finish",
-  },
-  hold: {
-    label: "Hold Button",
-    icon: <IconHandStop className="size-4" />,
-    description: "Hold a button continuously",
-  },
-  type: {
-    label: "Type Text",
-    icon: <IconKeyboard className="size-4" />,
-    description: "Type a random UUID (no copy/paste)",
-  },
-};
 
 // Pattern Rule Editor Component
 const PatternRuleItem = memo(function PatternRuleItem({

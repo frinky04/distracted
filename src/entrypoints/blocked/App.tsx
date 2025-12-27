@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  generateAnnoyingText,
   type BlockedSite,
   type UnlockMethod,
 } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -15,295 +13,16 @@ import {
 } from "@/components/ui/card";
 import {
   IconShieldLock,
-  IconClock,
-  IconHandStop,
-  IconKeyboard,
   IconCheck,
   IconX,
   IconArrowRight,
   IconArrowLeft,
   IconLockOpen,
 } from "@tabler/icons-react";
-
-// Timer Challenge Component
-const TimerChallenge = memo(function TimerChallenge({
-  duration,
-  onComplete,
-}: {
-  duration: number;
-  onComplete: () => void;
-}) {
-  const [remaining, setRemaining] = useState(duration);
-  const [started, setStarted] = useState(false);
-
-  useEffect(() => {
-    if (!started) return;
-
-    if (remaining <= 0) {
-      onComplete();
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setRemaining((r) => r - 1);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [started, remaining, onComplete]);
-
-  const progress = ((duration - remaining) / duration) * 100;
-
-  return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <div className="relative mx-auto w-32 h-32">
-          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-            <circle
-              cx="50"
-              cy="50"
-              r="42"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="8"
-              className="text-muted/20"
-            />
-            <circle
-              cx="50"
-              cy="50"
-              r="42"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="8"
-              strokeLinecap="round"
-              strokeDasharray={264}
-              strokeDashoffset={264 - (264 * progress) / 100}
-              className="text-primary transition-all duration-1000"
-            />
-          </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-3xl font-mono font-bold">{remaining}</span>
-          </div>
-        </div>
-      </div>
-
-      {!started ? (
-        <Button onClick={() => setStarted(true)} className="w-full" size="lg">
-          <IconClock className="size-5" />
-          Start {duration}s Timer
-        </Button>
-      ) : remaining > 0 ? (
-        <p className="text-center text-muted-foreground text-sm">
-          Wait for the timer to complete...
-        </p>
-      ) : (
-        <div className="flex items-center justify-center gap-2 text-green-500">
-          <IconCheck className="size-5" />
-          <span>Timer complete!</span>
-        </div>
-      )}
-    </div>
-  );
-});
-
-// Hold Button Challenge Component
-const HoldChallenge = memo(function HoldChallenge({
-  duration,
-  onComplete,
-}: {
-  duration: number;
-  onComplete: () => void;
-}) {
-  const [holding, setHolding] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [completed, setCompleted] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const handleStart = useCallback(() => {
-    setHolding(true);
-  }, []);
-
-  const handleEnd = useCallback(() => {
-    setHolding(false);
-    if (elapsed < duration) {
-      setElapsed(0);
-    }
-  }, [elapsed, duration]);
-
-  useEffect(() => {
-    if (holding && !completed) {
-      intervalRef.current = setInterval(() => {
-        setElapsed((e) => {
-          const newElapsed = e + 0.1;
-          if (newElapsed >= duration) {
-            setCompleted(true);
-            setHolding(false);
-            onComplete();
-            return duration;
-          }
-          return newElapsed;
-        });
-      }, 100);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [holding, completed, duration, onComplete]);
-
-  const progress = (elapsed / duration) * 100;
-
-  return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <div className="h-4 bg-muted/20 rounded-full overflow-hidden mb-4">
-          <div
-            className={`h-full transition-all duration-100 rounded-full ${
-              holding
-                ? "bg-primary"
-                : elapsed > 0 && !completed
-                  ? "bg-destructive/50"
-                  : "bg-primary"
-            }`}
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <p className="text-2xl font-mono font-bold">
-          {elapsed.toFixed(1)}s / {duration}s
-        </p>
-      </div>
-
-      {!completed ? (
-        <>
-          <Button
-            onMouseDown={handleStart}
-            onMouseUp={handleEnd}
-            onMouseLeave={handleEnd}
-            onTouchStart={handleStart}
-            onTouchEnd={handleEnd}
-            variant={holding ? "default" : "outline"}
-            className={`w-full h-20 text-lg transition-all ${
-              holding ? "scale-95 bg-primary" : ""
-            }`}
-            size="lg"
-          >
-            <IconHandStop className="size-6" />
-            {holding ? "Keep Holding..." : "Hold to Unlock"}
-          </Button>
-          {elapsed > 0 && !holding && (
-            <p className="text-center text-destructive text-sm">
-              Don't let go! Progress has been reset.
-            </p>
-          )}
-        </>
-      ) : (
-        <div className="flex items-center justify-center gap-2 text-green-500">
-          <IconCheck className="size-5" />
-          <span>Challenge complete!</span>
-        </div>
-      )}
-    </div>
-  );
-});
-
-// Type Challenge Component
-const TypeChallenge = memo(function TypeChallenge({
-  onComplete,
-}: {
-  onComplete: () => void;
-}) {
-  const [targetText] = useState(() => generateAnnoyingText());
-  const [inputText, setInputText] = useState("");
-  const [completed, setCompleted] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newValue = e.target.value;
-      const diff = Math.abs(newValue.length - inputText.length);
-      if (diff > 1 && newValue.length > inputText.length) {
-        return;
-      }
-
-      setInputText(newValue);
-
-      if (newValue === targetText) {
-        setCompleted(true);
-        onComplete();
-      }
-    },
-    [inputText, targetText, onComplete]
-  );
-
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    e.preventDefault();
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-  }, []);
-
-  const charStatuses = targetText.split("").map((char, i) => {
-    if (i >= inputText.length) return "pending";
-    return inputText[i] === char ? "correct" : "incorrect";
-  });
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <div className="flex justify-between text-sm text-muted-foreground mb-2">
-          <p>Type this text exactly:</p>
-          <p>
-            {inputText.length}/{targetText.length}
-          </p>
-        </div>
-        <div className="p-3 bg-muted/30 rounded-lg overflow-hidden flex justify-center">
-          <code className="text-sm font-mono tracking-wider whitespace-nowrap">
-            {targetText.split("").map((char, i) => (
-              <span
-                key={i}
-                className={`${
-                  charStatuses[i] === "correct"
-                    ? "text-green-500"
-                    : charStatuses[i] === "incorrect"
-                      ? "text-destructive bg-destructive/20"
-                      : "text-muted-foreground"
-                }`}
-              >
-                {char}
-              </span>
-            ))}
-          </code>
-        </div>
-      </div>
-
-      {!completed ? (
-        <Input
-          ref={inputRef}
-          value={inputText}
-          onChange={handleInput}
-          onPaste={handlePaste}
-          onDrop={handleDrop}
-          placeholder="Start typing..."
-          className="font-mono text-center tracking-wider"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-      ) : (
-        <div className="flex items-center justify-center gap-2 text-green-500">
-          <IconCheck className="size-5" />
-          <span>Challenge complete!</span>
-        </div>
-      )}
-    </div>
-  );
-});
+import {
+  CHALLENGE_COMPONENTS,
+  CHALLENGE_METADATA,
+} from "@/components/challenges/index";
 
 // Main blocked page component
 export default function BlockedPage() {
@@ -499,15 +218,15 @@ export default function BlockedPage() {
   }
 
   const methodIcons: Record<UnlockMethod, React.ReactNode> = {
-    timer: <IconClock className="size-5" />,
-    hold: <IconHandStop className="size-5" />,
-    type: <IconKeyboard className="size-5" />,
+    timer: CHALLENGE_METADATA.timer.icon,
+    hold: CHALLENGE_METADATA.hold.icon,
+    type: CHALLENGE_METADATA.type.icon,
   };
 
   const methodTitles: Record<UnlockMethod, string> = {
-    timer: "Wait to Access",
-    hold: "Hold to Access",
-    type: "Type to Access",
+    timer: CHALLENGE_METADATA.timer.title,
+    hold: CHALLENGE_METADATA.hold.title,
+    type: CHALLENGE_METADATA.type.title,
   };
 
   return (
@@ -575,23 +294,20 @@ export default function BlockedPage() {
                 </span>
               </div>
 
-              {blockedSite.unlockMethod === "timer" && (
-                <TimerChallenge
-                  duration={blockedSite.unlockDuration}
-                  onComplete={handleChallengeComplete}
-                />
-              )}
-
-              {blockedSite.unlockMethod === "hold" && (
-                <HoldChallenge
-                  duration={blockedSite.unlockDuration}
-                  onComplete={handleChallengeComplete}
-                />
-              )}
-
-              {blockedSite.unlockMethod === "type" && (
-                <TypeChallenge onComplete={handleChallengeComplete} />
-              )}
+              {(() => {
+                const ChallengeComponent =
+                  CHALLENGE_COMPONENTS[blockedSite.unlockMethod];
+                return (
+                  <ChallengeComponent
+                    duration={
+                      blockedSite.unlockMethod === "type"
+                        ? undefined
+                        : blockedSite.unlockDuration
+                    }
+                    onComplete={handleChallengeComplete}
+                  />
+                );
+              })()}
             </div>
           )}
 

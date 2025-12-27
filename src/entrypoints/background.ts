@@ -15,6 +15,7 @@ import {
   handleRelockAlarm,
   isMV3,
 } from "@/lib/blocker";
+import { isInternalUrl } from "@/lib/utils";
 
 export default defineBackground(() => {
   console.log("[distacted] Background script initialized");
@@ -71,11 +72,8 @@ export default defineBackground(() => {
   // Helper to check URL and redirect if blocked
   // Used by webNavigation listeners for soft navigation detection
   async function checkAndBlockUrl(tabId: number, url: string, source: string) {
-    // Skip extension pages
-    if (url.startsWith("chrome-extension://")) return;
-    if (url.startsWith("moz-extension://")) return;
-    if (url.startsWith("chrome://")) return;
-    if (url.startsWith("about:")) return;
+    // Skip extension pages and internal URLs
+    if (isInternalUrl(url)) return;
 
     // Check if this URL is blocked
     const site = await findMatchingBlockedSite(url);

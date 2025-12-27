@@ -6,23 +6,25 @@
 import * as dnr from "./dnr";
 import * as webRequest from "./webRequest";
 
-// Detect if we're in MV3 (Chrome) or MV2 (Firefox)
-// In MV3, declarativeNetRequest API exists and works
-// In MV2 Firefox, this API doesn't exist
-const hasDNR = typeof browser !== "undefined" && 
-  "declarativeNetRequest" in browser &&
-  typeof browser.declarativeNetRequest?.getDynamicRules === "function";
+// Detect manifest version using WXT env vars
+// Fallback to API detection if env vars aren't available
+const manifestVersion = 
+  (typeof import.meta !== "undefined" && import.meta.env?.MANIFEST_VERSION) ||
+  (typeof browser !== "undefined" && 
+   "declarativeNetRequest" in browser &&
+   typeof browser.declarativeNetRequest?.getDynamicRules === "function"
+    ? 3
+    : 2);
 
-const hasWebRequestBlocking = typeof browser !== "undefined" &&
-  "webRequest" in browser &&
-  browser.webRequest?.onBeforeRequest !== undefined;
+const isMV3 = manifestVersion === 3;
 
-// Prefer DNR if available (Chrome MV3), fall back to webRequest (Firefox MV2)
-const isMV3 = hasDNR;
+// Get browser name from WXT env
+const browserName = 
+  (typeof import.meta !== "undefined" && import.meta.env?.BROWSER) || "chrome";
 
 console.log(`[distacted] Browser detection:`, {
-  hasDNR,
-  hasWebRequestBlocking,
+  browser: browserName,
+  manifestVersion,
   usingMV3: isMV3,
 });
 console.log(`[distacted] Using ${isMV3 ? "DNR (MV3)" : "webRequest (MV2)"} blocker`);

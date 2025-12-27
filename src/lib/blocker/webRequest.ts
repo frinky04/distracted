@@ -13,9 +13,8 @@ import {
   urlMatchesSiteRules,
   type BlockedSite,
 } from "@/lib/storage";
-
-// Alarm prefix for relock timers
-const ALARM_PREFIX = "relock_";
+import { ALARM_PREFIX } from "@/lib/consts";
+import { isInternalUrl } from "@/lib/utils";
 
 interface UnlockState {
   siteId: string;
@@ -85,11 +84,8 @@ function onBeforeRequestListener(
   const url = details.url;
   const tabId = details.tabId;
 
-  // Skip extension pages
-  if (url.startsWith("moz-extension://")) {
-    return undefined;
-  }
-  if (url.startsWith("about:")) {
+  // Skip extension pages and internal URLs
+  if (isInternalUrl(url)) {
     return undefined;
   }
 
@@ -206,7 +202,8 @@ export async function findTabsOnBlockedSite(siteId: string): Promise<number[]> {
 
   for (const tab of tabs) {
     if (!tab.id || !tab.url) continue;
-    if (tab.url.startsWith("moz-extension://")) continue;
+    // Skip extension pages and internal URLs
+    if (isInternalUrl(tab.url)) continue;
 
     if (urlMatchesSiteRules(tab.url, site)) {
       matchingTabIds.push(tab.id);

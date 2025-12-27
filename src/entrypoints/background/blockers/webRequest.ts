@@ -28,63 +28,7 @@ export async function refreshCache(): Promise<void> {
   cachedSites = await getBlockedSites();
 }
 
-function shouldBlockUrl(url: string): {
-  blocked: boolean;
-  site: BlockedSite | null;
-} {
-  for (const site of cachedSites) {
-    if (!site.enabled) {
-      continue;
-    }
 
-    const unlockState = unlockedSites.get(site.id);
-    if (unlockState && unlockState.expiresAt > Date.now()) {
-      continue;
-    }
-
-    const matches = urlMatchesSiteRules(url, site);
-
-    if (matches) {
-      return { blocked: true, site };
-    }
-  }
-  return { blocked: false, site: null };
-}
-
-function onBeforeRequestListener(details: {
-  url: string;
-  type: string;
-  tabId: number;
-}): { cancel: boolean } | undefined {
-  if (details.type !== "main_frame") {
-    return undefined;
-  }
-
-  const url = details.url;
-  const tabId = details.tabId;
-
-  if (isInternalUrl(url)) {
-    return undefined;
-  }
-
-  const { blocked, site } = shouldBlockUrl(url);
-
-  if (!blocked || !site) {
-    return undefined;
-  }
-
-  const blockedPageUrl = browser.runtime.getURL(
-    `/blocked.html?url=${encodeURIComponent(url)}&siteId=${encodeURIComponent(site.id)}`
-  );
-
-  if (tabId && tabId !== -1) {
-    browser.tabs.update(tabId, { url: blockedPageUrl }).catch((err) => {
-      console.error(`[distacted] Failed to redirect tab ${tabId}:`, err);
-    });
-  }
-
-  return { cancel: true };
-}
 
 export async function initializeWebRequest(): Promise<void> {
   await refreshCache();
@@ -94,7 +38,47 @@ export async function initializeWebRequest(): Promise<void> {
   }
 
   browser.webRequest.onBeforeRequest.addListener(
-    onBeforeRequestListener,
+    (details: { url: string; type: string; tabId: number }) => {
+      if (details.type !== "main_frame") {
+        return undefined;
+      }
+
+      const url = details.url;
+      const tabId = details.tabId;
+
+      if (isInternalUrl(url)) {
+        return undefined;
+      }
+
+      for (const site of cachedSites) {
+        if (!site.enabled) {
+          continue;
+        }
+
+        const unlockState = unlockedSites.get(site.id);
+        if (unlockState && unlockState.expiresAt > Date.now()) {
+          continue;
+        }
+
+        const matches = urlMatchesSiteRules(url, site);
+
+        if (matches) {
+          const blockedPageUrl = browser.runtime.getURL(
+            `/blocked.html?url=${encodeURIComponent(url)}&siteId=${encodeURIComponent(site.id)}`
+          );
+
+          if (tabId && tabId !== -1) {
+            browser.tabs.update(tabId, { url: blockedPageUrl }).catch((err) => {
+              console.error(`[distacted] Failed to redirect tab ${tabId}:`, err);
+            });
+          }
+
+          return { cancel: true };
+        }
+      }
+
+      return undefined;
+    },
     { urls: ["<all_urls>"], types: ["main_frame"] },
     ["blocking"]
   );

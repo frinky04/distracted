@@ -39,14 +39,6 @@ export const defaultSettings: Settings = {
   statsEnabled: true,
 };
 
-export function generateId(): string {
-  return Math.random().toString(36).substring(2, 10);
-}
-
-export function generateAnnoyingText(): string {
-  return crypto.randomUUID();
-}
-
 export async function getBlockedSites(): Promise<BlockedSite[]> {
   const result = (await browser.storage.local.get(
     STORAGE_KEYS.BLOCKED_SITES
@@ -64,7 +56,7 @@ export async function addBlockedSite(
   const sites = await getBlockedSites();
   const newSite: BlockedSite = {
     ...site,
-    id: generateId(),
+    id: Math.random().toString(36).substring(2, 10),
     createdAt: Date.now(),
   };
   sites.push(newSite);
@@ -84,50 +76,13 @@ export async function updateBlockedSite(
   }
 }
 
-export async function deleteBlockedSite(id: string): Promise<void> {
-  const sites = await getBlockedSites();
-  await saveBlockedSites(sites.filter((s) => s.id !== id));
-}
+
 
 export async function getStats(): Promise<SiteStats[]> {
   const result = (await browser.storage.local.get(
     STORAGE_KEYS.STATS
   )) as Record<string, SiteStats[] | undefined>;
   return result[STORAGE_KEYS.STATS] ?? [];
-}
-
-export async function updateStats(
-  siteId: string,
-  update: Partial<SiteStats> & {
-    incrementVisit?: boolean;
-    incrementPassed?: boolean;
-    addTime?: number;
-  }
-): Promise<void> {
-  const stats = await getStats();
-  let siteStats = stats.find((s) => s.siteId === siteId);
-
-  if (!siteStats) {
-    siteStats = {
-      siteId,
-      visitCount: 0,
-      passedCount: 0,
-      timeSpentMs: 0,
-      lastVisit: Date.now(),
-    };
-    stats.push(siteStats);
-  }
-
-  if (update.incrementVisit) siteStats.visitCount++;
-  if (update.incrementPassed) siteStats.passedCount++;
-  if (update.addTime) siteStats.timeSpentMs += update.addTime;
-  siteStats.lastVisit = Date.now();
-
-  await browser.storage.local.set({ [STORAGE_KEYS.STATS]: stats });
-}
-
-export async function clearStats(): Promise<void> {
-  await browser.storage.local.set({ [STORAGE_KEYS.STATS]: [] });
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -137,9 +92,7 @@ export async function getSettings(): Promise<Settings> {
   return { ...defaultSettings, ...(result[STORAGE_KEYS.SETTINGS] ?? {}) };
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
-  await browser.storage.local.set({ [STORAGE_KEYS.SETTINGS]: settings });
-}
+
 
 export function urlMatchesPattern(url: string, pattern: string): boolean {
   try {
@@ -214,25 +167,4 @@ export async function findMatchingBlockedSite(
 ): Promise<BlockedSite | null> {
   const sites = await getBlockedSites();
   return sites.find((site) => urlMatchesSiteRules(url, site)) || null;
-}
-
-export async function getCurrentTabUrl(): Promise<string | null> {
-  try {
-    const [tab] = await browser.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    return tab?.url || null;
-  } catch {
-    return null;
-  }
-}
-
-export function extractDomain(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
 }

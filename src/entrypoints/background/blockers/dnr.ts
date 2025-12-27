@@ -23,77 +23,64 @@ interface UnlockState {
   expiresAt: number;
 }
 
-function patternToDnrFilter(pattern: string): string {
-  let normalized = pattern
-    .toLowerCase()
-    .trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "");
 
-  if (normalized.startsWith("*.")) {
-    const domain = normalized.slice(2);
-    return `||${domain}`;
-  }
-
-  return `||${normalized}`;
-}
-
-function getRuleId(siteIndex: number, patternIndex: number): number {
-  return RULE_ID_BASE + siteIndex * MAX_RULES_PER_SITE + patternIndex;
-}
-
-function createSiteRules(
-  site: BlockedSite,
-  siteIndex: number
-): Browser.declarativeNetRequest.Rule[] {
-  if (!site.enabled) return [];
-
-  const rules: Browser.declarativeNetRequest.Rule[] = [];
-  const blockPatterns = site.rules.filter((r) => !r.allow);
-
-  blockPatterns.forEach((rule, patternIndex) => {
-    const regexFilter = urlFilterToRegex(patternToDnrFilter(rule.pattern));
-
-    rules.push({
-      id: getRuleId(siteIndex, patternIndex),
-      priority: 1,
-      action: {
-        type: "block",
-      },
-      condition: {
-        regexFilter,
-        resourceTypes: ["main_frame"],
-      },
-    });
-  });
-
-  return rules;
-}
-
-/**
- * Convert a urlFilter-style pattern to a regex
- */
-function urlFilterToRegex(urlFilter: string): string {
-  let pattern = urlFilter.replace(/^\|\|/, "");
-  pattern = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-  pattern = pattern.replace(/\*/g, ".*");
-  return `^(https?://(www\\.)?${pattern}.*)$`;
-}
 
 export async function syncDnrRules(): Promise<void> {
   const sites = await getBlockedSites();
   const existingRules = await browser.declarativeNetRequest.getDynamicRules();
   const existingRuleIds = existingRules.map((r) => r.id);
-  const unlockedSiteIds = await getUnlockedSiteIds();
+  
+  const session = await browser.storage.session.get();
+  const unlockedIds = new Set<string>();
+  const now = Date.now();
+
+  for (const [key, value] of Object.entries(session)) {
+    if (key.startsWith(UNLOCK_PREFIX)) {
+      const state = value as any;
+      if (state.expiresAt > now) {
+        unlockedIds.add(state.siteId);
+      }
+    }
+  }
 
   const newRules: Browser.declarativeNetRequest.Rule[] = [];
 
   sites.forEach((site, index) => {
     if (!site.enabled) return;
-    if (unlockedSiteIds.has(site.id)) return;
+    if (unlockedIds.has(site.id)) return;
 
-    const siteRules = createSiteRules(site, index);
-    newRules.push(...siteRules);
+    const blockPatterns = site.rules.filter((r) => !r.allow);
+
+    blockPatterns.forEach((rule, patternIndex) => {
+      let normalized = rule.pattern
+        .toLowerCase()
+        .trim()
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "");
+
+      let dnrFilter = `||${normalized}`;
+      if (normalized.startsWith("*.")) {
+        const domain = normalized.slice(2);
+        dnrFilter = `||${domain}`;
+      }
+
+      let pattern = dnrFilter.replace(/^\|\|/, "");
+      pattern = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+      pattern = pattern.replace(/\*/g, ".*");
+      const regexFilter = `^(https?://(www\\.)?${pattern}.*)$`;
+
+      newRules.push({
+        id: RULE_ID_BASE + index * MAX_RULES_PER_SITE + patternIndex,
+        priority: 1,
+        action: {
+          type: "block",
+        },
+        condition: {
+          regexFilter,
+          resourceTypes: ["main_frame"],
+        },
+      });
+    });
   });
 
   await browser.declarativeNetRequest.updateDynamicRules({
@@ -106,22 +93,7 @@ export async function syncDnrRules(): Promise<void> {
   );
 }
 
-async function getUnlockedSiteIds(): Promise<Set<string>> {
-  const session = await browser.storage.session.get();
-  const unlockedIds = new Set<string>();
-  const now = Date.now();
 
-  for (const [key, value] of Object.entries(session)) {
-    if (key.startsWith(UNLOCK_PREFIX)) {
-      const state = value as UnlockState;
-      if (state.expiresAt > now) {
-        unlockedIds.add(state.siteId);
-      }
-    }
-  }
-
-  return unlockedIds;
-}
 
 export async function grantAccess(
   siteId: string,
@@ -247,13 +219,4 @@ export async function initializeDnr(): Promise<void> {
   await syncDnrRules();
 }
 
-export async function clearAllRules(): Promise<void> {
-  const existingRules = await browser.declarativeNetRequest.getDynamicRules();
-  const existingRuleIds = existingRules.map((r) => r.id);
 
-  await browser.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: existingRuleIds,
-  });
-
-  console.log("[distacted] Cleared all DNR rules");
-}

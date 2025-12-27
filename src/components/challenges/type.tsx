@@ -1,12 +1,11 @@
 import { useState, useCallback, useRef, memo } from "react";
 import { Input } from "@/components/ui/input";
 import { IconCheck } from "@tabler/icons-react";
-import { generateAnnoyingText } from "@/lib/storage";
 import type { ChallengeComponentProps } from "./index";
 
 export const TypeChallenge = memo(
   ({ settings, onComplete }: ChallengeComponentProps<{}>) => {
-    const [targetText] = useState(() => generateAnnoyingText());
+    const [targetText] = useState(() => crypto.randomUUID());
     const [inputText, setInputText] = useState("");
     const [completed, setCompleted] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);

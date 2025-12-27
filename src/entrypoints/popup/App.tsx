@@ -1,20 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import {
   getBlockedSites,
-  addBlockedSite,
   updateBlockedSite,
-  deleteBlockedSite,
   getStats,
   getSettings,
-  saveSettings,
-  clearStats,
   type BlockedSite,
   type SiteStats,
   type Settings,
   type UnlockMethod,
   type PatternRule,
 } from "@/lib/storage";
-import { formatDuration } from "@/lib/utils";
 import { DEFAULT_AUTO_RELOCK } from "@/lib/consts";
 import {
   CHALLENGES,
@@ -226,7 +221,20 @@ const StatItem = memo(function StatItem({
         </div>
         <div>
           <div className="text-lg font-bold text-chart-3">
-            {formatDuration(stat.timeSpentMs)}
+            {(() => {
+              const ms = stat.timeSpentMs;
+              const seconds = Math.floor(ms / 1000);
+              const minutes = Math.floor(seconds / 60);
+              const hours = Math.floor(minutes / 60);
+
+              if (hours > 0) {
+                return `${hours}h ${minutes % 60}m`;
+              }
+              if (minutes > 0) {
+                return `${minutes}m ${seconds % 60}s`;
+              }
+              return `${seconds}s`;
+            })()}
           </div>
           <div className="text-xs text-muted-foreground">Time Wasted</div>
         </div>
@@ -317,7 +325,14 @@ export default function App() {
     if (editingSite) {
       await updateBlockedSite(editingSite.id, siteData);
     } else {
-      await addBlockedSite(siteData);
+      const sites = await getBlockedSites();
+      const newSite = {
+        ...siteData,
+        id: Math.random().toString(36).substring(2, 10),
+        createdAt: Date.now(),
+      };
+      sites.push(newSite);
+      await browser.storage.local.set({ ["blockedSites"]: sites });
     }
 
     resetForm();
@@ -358,7 +373,8 @@ export default function App() {
 
   const handleDeleteSite = useCallback(
     async (id: string) => {
-      await deleteBlockedSite(id);
+      const sites = await getBlockedSites();
+      await browser.storage.local.set({ ["blockedSites"]: sites.filter((s) => s.id !== id) });
       loadData();
     },
     [loadData]
@@ -366,12 +382,12 @@ export default function App() {
 
   const handleToggleStats = useCallback(async () => {
     const newSettings = { ...settings, statsEnabled: !settings.statsEnabled };
-    await saveSettings(newSettings);
+    await browser.storage.local.set({ ["settings"]: newSettings });
     setSettings(newSettings);
   }, [settings]);
 
   const handleClearStats = useCallback(async () => {
-    await clearStats();
+    await browser.storage.local.set({ ["stats"]: [] });
     loadData();
   }, [loadData]);
 

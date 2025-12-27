@@ -1,10 +1,7 @@
 import {
   findMatchingBlockedSite,
   getBlockedSites,
-  updateStats,
   getSettings,
-  getCurrentTabUrl,
-  extractDomain,
 } from "@/lib/storage";
 import * as dnr from "./blockers/dnr";
 import * as webRequest from "./blockers/webRequest";
@@ -194,7 +191,30 @@ export default defineBackground(() => {
 
           case "UPDATE_STATS": {
             const { siteId, update } = message;
-            await updateStats(siteId, update);
+            (async () => {
+              const statsResult = await browser.storage.local.get("stats");
+              const stats = (statsResult["stats"] ?? []) as any[];
+              let siteStats = stats.find((s) => s.siteId === siteId);
+
+              if (!siteStats) {
+                siteStats = {
+                  siteId,
+                  visitCount: 0,
+                  passedCount: 0,
+                  timeSpentMs: 0,
+                  lastVisit: Date.now(),
+                };
+                stats.push(siteStats);
+              }
+
+              if (update.incrementVisit) siteStats.visitCount++;
+              if (update.incrementPassed) siteStats.passedCount++;
+              if (update.addTime) siteStats.timeSpentMs += update.addTime;
+              siteStats.lastVisit = Date.now();
+
+              await browser.storage.local.set({ stats });
+            })().catch((err) => console.error("Failed to update stats:", err));
+
             sendResponse({ success: true });
             break;
           }
@@ -206,8 +226,27 @@ export default defineBackground(() => {
           }
 
           case "GET_CURRENT_TAB_URL": {
-            const url = await getCurrentTabUrl();
-            const domain = url ? extractDomain(url) : "";
+            let url: string | null = null;
+            try {
+              const [tab] = await browser.tabs.query({
+                active: true,
+                currentWindow: true,
+              });
+              url = tab?.url || null;
+            } catch {
+              url = null;
+            }
+
+            let domain = "";
+            if (url) {
+              try {
+                const urlObj = new URL(url);
+                domain = urlObj.hostname.replace(/^www\./, "");
+              } catch {
+                domain = "";
+              }
+            }
+
             sendResponse({ url, domain });
             break;
           }
